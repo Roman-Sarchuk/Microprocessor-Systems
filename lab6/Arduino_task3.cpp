@@ -14,9 +14,7 @@ bool buttonState = HIGH;
 
 
 void printRandNum() {
-  lcd.setCursor(0, 0);
-  lcd.print("                ");
-  lcd.setCursor(0, 0);
+  lcd.clear();
   lcd.print(random());
 }
 
