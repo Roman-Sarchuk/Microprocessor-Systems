@@ -1,28 +1,30 @@
 #include <DHT.h>
 
-// PIN DEFINITIONS
-const int DIG1 = 5;
+/* ----------- PIN CONFIG ----------- */
+
+// 74HC595 pins
+const int PIN_DATA = 8;   // DS
+const int PIN_CLK  = 9;   // SH_CP
+const int PIN_LATCH = 10; // ST_CP
+
+// Digit control pins (common anode/cathode)
+const int DIG1 = 3;
 const int DIG2 = 4;
-const int DIG3 = 3;
-const int DIG4 = 2;
+const int DIG3 = 5;
+const int DIG4 = 6;
 
-const int DATA_PIN = 6;
-const int CLOCK_PIN = 7;
-const int LATCH_PIN = 10;
-
-const int RED_PIN = A1;
+// RGB LED pins
+const int RED_PIN   = A1;
 const int GREEN_PIN = A2;
-const int BLUE_PIN = A3;
+const int BLUE_PIN  = A3;
 
+// DHT11
 const int DHT_PIN = A4;
-const int DHT_TYPE = DHT11;
+DHT dht(DHT_PIN, DHT11);
 
-DHT dht(DHT_PIN, DHT_TYPE);
-
-// digit codes for 74HC595
-// Segments:  DP G F E D C B A
-// (common cathode)
-const uint8_t digitCode[10] = {
+/* ----------- SEGMENT TABLE ----------- */
+// 0b(dp)(g)(f)(e)(d)(c)(b)(a)
+const uint8_t segCode[10] = {
   0b00111111, //0
   0b00000110, //1
   0b01011011, //2
@@ -35,32 +37,24 @@ const uint8_t digitCode[10] = {
   0b01101111  //9
 };
 
-// letter 't' (segments: f,e,d,g)
-const uint8_t LETTER_t = 
-  0b01111000;
+/* ----------- 74HC595 OUTPUT ----------- */
 
-// letter 'h' (segments: f,e,d,c)
-const uint8_t LETTER_h = 
-  0b01110100;
-
-
-// Send byte to 74HC595
-void shiftSend(uint8_t data) {
-  digitalWrite(LATCH_PIN, LOW);
-  shiftOut(DATA_PIN, CLOCK_PIN, MSBFIRST, data);
-  digitalWrite(LATCH_PIN, HIGH);
+void shiftOut595(uint8_t data) {
+  digitalWrite(PIN_LATCH, LOW);
+  shiftOut(PIN_DATA, PIN_CLK, MSBFIRST, data);
+  digitalWrite(PIN_LATCH, HIGH);
 }
 
+/* ----------- SHOW DIGIT ----------- */
 
-// Display single digit
-void showDigit(uint8_t digit, uint8_t code) {
-  // turn all digits off
+void showDigit(int digit, uint8_t code) {
+  // turn all OFF
   digitalWrite(DIG1, LOW);
   digitalWrite(DIG2, LOW);
   digitalWrite(DIG3, LOW);
   digitalWrite(DIG4, LOW);
 
-  shiftSend(code);
+  shiftOut595(code);
 
   switch (digit) {
     case 1: digitalWrite(DIG1, HIGH); break;
@@ -69,49 +63,38 @@ void showDigit(uint8_t digit, uint8_t code) {
     case 4: digitalWrite(DIG4, HIGH); break;
   }
 
-  delay(3); // multiplex
+  delay(2);
 }
 
+/* ----------- RGB CONTROL ----------- */
 
-// Show 4 digits for ms
-void show4(uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4, uint16_t ms) {
-  uint32_t t0 = millis();
-  while (millis() - t0 < ms) {
-    showDigit(1, d1);
-    showDigit(2, d2);
-    showDigit(3, d3);
-    showDigit(4, d4);
-  }
-}
-
-
-// RGB by humidity
 void rgb_set(float h) {
-  if (h < 40) {
+
+  if (h < 40) {          // недостатня вологість
     digitalWrite(RED_PIN, LOW);
     digitalWrite(GREEN_PIN, LOW);
-    digitalWrite(BLUE_PIN, HIGH);  // blue
+    digitalWrite(BLUE_PIN, HIGH);
   }
-  else if (h >= 40 && h <= 60) {
+  else if (h <= 60) {    // норма
     digitalWrite(RED_PIN, LOW);
-    digitalWrite(GREEN_PIN, HIGH); // green
+    digitalWrite(GREEN_PIN, HIGH);
     digitalWrite(BLUE_PIN, LOW);
   }
-  else {
-    digitalWrite(RED_PIN, HIGH);   // red
+  else {                 // висока вологість
+    digitalWrite(RED_PIN, HIGH);
     digitalWrite(GREEN_PIN, LOW);
     digitalWrite(BLUE_PIN, LOW);
   }
 }
 
+/* ----------- SETUP ----------- */
 
-// SETUP
 void setup() {
   dht.begin();
 
-  pinMode(DATA_PIN, OUTPUT);
-  pinMode(CLOCK_PIN, OUTPUT);
-  pinMode(LATCH_PIN, OUTPUT);
+  pinMode(PIN_DATA, OUTPUT);
+  pinMode(PIN_CLK, OUTPUT);
+  pinMode(PIN_LATCH, OUTPUT);
 
   pinMode(DIG1, OUTPUT);
   pinMode(DIG2, OUTPUT);
@@ -121,49 +104,43 @@ void setup() {
   pinMode(RED_PIN, OUTPUT);
   pinMode(GREEN_PIN, OUTPUT);
   pinMode(BLUE_PIN, OUTPUT);
-
-  digitalWrite(RED_PIN, LOW);
-  digitalWrite(GREEN_PIN, LOW);
-  digitalWrite(BLUE_PIN, LOW);
 }
 
+/* ----------- LOOP ----------- */
 
-// LOOP
+unsigned long lastRead = 0;
+float temp = 0, hum = 0;
+
+uint8_t t1, t2, h1, h2;
+
 void loop() {
-  float h = dht.readHumidity();
-  float t = dht.readTemperature();
 
-  if (isnan(h) || isnan(t)) {
-    show4(0,0,0,0,500);
-    return;
+  /* --- Read every 100 ms --- */
+  if (millis() - lastRead >= 100) {
+    lastRead = millis();
+
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+
+    if (!isnan(h) && !isnan(t)) {
+      hum = h;
+      temp = t;
+
+      int T = constrain((int)temp, 0, 99);
+      int H = constrain((int)hum, 0, 99);
+
+      t1 = T / 10;
+      t2 = T % 10;
+      h1 = H / 10;
+      h2 = H % 10;
+    }
+
+    rgb_set(hum);
   }
 
-  // convert to integer 0...999
-  int tempVal = (int)(t + 0.5);
-  int humVal  = (int)(h + 0.5);
-
-  if (tempVal < 0) tempVal = 0;
-  if (tempVal > 999) tempVal = 999;
-
-  if (humVal < 0) humVal = 0;
-  if (humVal > 999) humVal = 999;
-
-  // RGB update by humidity
-  rgb_set(h);
-
-  // Show temperature tXXX
-  uint8_t d1 = LETTER_t;
-  uint8_t d2 = digitCode[(tempVal / 100) % 10];
-  uint8_t d3 = digitCode[(tempVal / 10) % 10];
-  uint8_t d4 = digitCode[tempVal % 10];
-
-  show4(d1, d2, d3, d4, 1000);
-
-  // Show humidity hXXX
-  d1 = LETTER_h;
-  d2 = digitCode[(humVal / 100) % 10];
-  d3 = digitCode[(humVal / 10) % 10];
-  d4 = digitCode[humVal % 10];
-
-  show4(d1, d2, d3, d4, 1000);
+  /* --- Multiplex display --- */
+  showDigit(1, segCode[t1]);
+  showDigit(2, segCode[t2] | 0b10000000);  // точка після температури
+  showDigit(3, segCode[h1]);
+  showDigit(4, segCode[h2]);
 }
